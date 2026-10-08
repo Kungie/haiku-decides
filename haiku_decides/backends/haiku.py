@@ -82,15 +82,27 @@ def answer_schema(question: Question) -> dict:
 
 
 def build_request(
-    state: str | dict | list, question: Question, order: list[str], *, effort: str = "medium", cache: bool
+    state: str | dict | list,
+    question: Question,
+    order: list[str],
+    *,
+    effort: str = "medium",
+    cache: bool,
+    cache_prefix: bool = False,
 ) -> dict:
+    """`cache` marks the question block. `cache_prefix` marks the system prompt instead, which
+    caches the constant part before it (the output schema and the system prompt) when the
+    question block itself changes on every call."""
     question_block: dict = {"type": "text", "text": render_question(question, order)}
     if cache:
         question_block["cache_control"] = {"type": "ephemeral"}
+    system: str | list = SYSTEM_PROMPT
+    if cache_prefix:
+        system = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
     return {
         "model": MODEL,
         "max_tokens": MAX_TOKENS,
-        "system": SYSTEM_PROMPT,
+        "system": system,
         "thinking": {"type": "disabled"},
         "output_config": {
             "effort": effort,
@@ -182,7 +194,10 @@ class HaikuBackend:
         return aggregate(question, list(samples), with_probabilities=self.mode != "single", latency_ms=latency_ms)
 
     async def _sample(self, state, question: Question, order: list[str], cache: bool) -> Sample:
-        request = build_request(state, question, order, effort=self.effort, cache=cache)
+        # when the question block cannot be cached, the constant prefix before it still can
+        request = build_request(
+            state, question, order, effort=self.effort, cache=cache, cache_prefix=not cache
+        )
         try:
             response = await self.client.messages.create(**request)
         except anthropic.APIError as e:

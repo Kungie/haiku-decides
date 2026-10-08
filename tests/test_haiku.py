@@ -173,3 +173,21 @@ def test_api_error_text_is_not_persisted():
     boom = anthropic.APIConnectionError(message="could not reach host with private text", request=httpx.Request("POST", "https://x"))
     a = asyncio.run(HaikuBackend(FakeClient([boom]), "single").decide("s", {"q": Q}))["q"]
     assert a.status == "error" and a.error == "APIConnectionError"
+
+
+CACHED_SYSTEM = [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+
+
+def test_shuffled_caches_the_constant_prefix_instead_of_the_question():
+    q = Question("choice", "q", {f"k{i}": f"d{i}" for i in range(8)})
+    c = FakeClient([resp('{"answer": "k3"}')] * 10)
+    asyncio.run(HaikuBackend(c, "shuffled", n=10).decide("s", {"q": q}))
+    for call in c.calls:
+        assert call["system"] == CACHED_SYSTEM
+        assert all("cache_control" not in block for block in call["messages"][0]["content"])
+
+
+def test_uncached_question_still_caches_the_prefix():
+    c = FakeClient([resp('{"answer": "b"}')])
+    asyncio.run(HaikuBackend(c, "single", cache=False).decide("s", {"q": Q}))
+    assert c.calls[0]["system"] == CACHED_SYSTEM
