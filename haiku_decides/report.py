@@ -10,8 +10,8 @@ import numpy as np
 
 from . import metrics
 from .datasets import Item
-from .metrics import Prices, bootstrap_ci, overlaps
-from .runner import applicable, load_records, result_path
+from .metrics import Prices, bootstrap_ci
+from .runner import ORDER_PERMUTATIONS, applicable, load_records, result_path
 from .schema import Usage
 
 SYSTEMS = ("jev", "openai", "haiku-single", "haiku-sampled", "haiku-shuffled")
@@ -25,11 +25,11 @@ PRICE_KEY = {
 }
 METRICS = (
     "coverage", "refusal_rate", "accuracy", "mae", "ece", "brier",
-    "flip_rate", "tv_shift", "p50_ms", "p95_ms", "usd_per_1k", "cache_read_ratio",
+    "flip_rate", "tv_shift", "repeat_flip", "p50_ms", "p95_ms", "usd_per_1k", "cache_read_ratio",
 )
 LABELS = {
     "coverage": "Coverage", "refusal_rate": "Refusals", "accuracy": "Accuracy", "mae": "MAE",
-    "ece": "ECE", "brier": "Brier", "flip_rate": "Flip rate", "tv_shift": "TV shift",
+    "ece": "ECE", "brier": "Brier", "flip_rate": "Flip rate", "tv_shift": "TV shift", "repeat_flip": "Repeat flip",
     "p50_ms": "p50 ms", "p95_ms": "p95 ms", "usd_per_1k": "$ / 1k", "cache_read_ratio": "Cache read",
 }
 NOT_APPLICABLE = "n/a"  # does not apply, or no data
@@ -49,6 +49,7 @@ class Scorecard:
     comparison_size: dict[str, int] = field(default_factory=dict)
     verdicts: dict[tuple[str, str, str], str] = field(default_factory=dict)  # (dataset, reference, haiku system)
     n: int | None = None
+    measured_on: str | None = None  # date of the latency pass
 
 
 def load_prices(path: Path) -> tuple[str, dict[str, Prices]]:
@@ -70,13 +71,14 @@ def _with_ci(per_item: np.ndarray) -> Cell:
     return Cell(float(per_item.mean()), bootstrap_ci(lambda idx: float(per_item[idx].mean()), len(per_item)))
 
 
-def _quality_cells(system: str, question_type: str, records: list[dict], golds: list) -> dict[str, Cell]:
+def _quality_cells(
+    system: str, question_type: str, records: list[dict], golds: list, correct: np.ndarray
+) -> dict[str, Cell]:
     """Accuracy, MAE, ECE and Brier over the comparison set."""
     na = Cell(note=NOT_APPLICABLE)
     if not records:
         return {"accuracy": na, "mae": na, "ece": na, "brier": na}
     answers = [r["answer"] for r in records]
-    correct = np.array([a == g for a, g in zip(answers, golds)], dtype=float)
     cells = {"accuracy": _with_ci(correct), "mae": na}
     if question_type == "score":
         cells["mae"] = _with_ci(np.array([abs(a - g) for a, g in zip(answers, golds)], dtype=float))
@@ -107,13 +109,14 @@ def _order_cells(system: str, order_records: dict) -> dict[str, Cell]:
         answers.setdefault(item_id, []).append(r["answer"])
         if r.get("probabilities"):
             probs.setdefault(item_id, []).append(r["probabilities"])
-    answers = {k: v for k, v in answers.items() if len(v) > 1}
+    # an item counts only when every one of its orderings was answered
+    answers = {k: v for k, v in answers.items() if len(v) == ORDER_PERMUTATIONS}
     if not answers:
         return {"flip_rate": Cell(note=NOT_APPLICABLE), "tv_shift": Cell(note=NOT_APPLICABLE)}
     if system == "haiku-single":
         tv = Cell(note=NOT_PRODUCED)
     else:
-        probs = {k: v for k, v in probs.items() if len(v) > 1}
+        probs = {k: v for k, v in probs.items() if k in answers and len(v) == ORDER_PERMUTATIONS}
         tv = Cell(metrics.mean_tv_distance(probs)) if probs else Cell(note=NOT_APPLICABLE)
     return {"flip_rate": Cell(metrics.flip_rate(answers)), "tv_shift": tv}
 
@@ -133,7 +136,13 @@ def build_scorecard(
             card.comparison_size[dataset] = 0
             continue
         question_type = items[0].question.type
-        included = [s for s in mains if applicable(s, question_type, "main")]
+        ok_count = {
+            s: sum(recs.get((item.item_id, 0), {}).get("status") == "ok" for item in items)
+            for s, recs in mains.items()
+        }
+        applicable_systems = [s for s in mains if applicable(s, question_type, "main")]
+        # a system that answered nothing must not empty the comparison set for the others
+        included = [s for s in applicable_systems if ok_count[s]]
         # the comparison set: items every included system answered
         common = [
             item for item in items
@@ -141,9 +150,10 @@ def build_scorecard(
         ]
         card.comparison_size[dataset] = len(common)
         golds = [item.gold for item in common]
+        correct_by_system: dict[str, np.ndarray] = {}
 
         for system, records in mains.items():
-            if system not in included:
+            if system not in applicable_systems:
                 for metric in METRICS:
                     card.cells[(dataset, system, metric)] = na
                 continue
@@ -153,9 +163,11 @@ def build_scorecard(
             statuses = [records.get((item.item_id, 0), {}).get("status") for item in items]
             cells["coverage"] = Cell(statuses.count("ok") / len(items))
             cells["refusal_rate"] = Cell(statuses.count("refused") / len(items))
-            cells.update(
-                _quality_cells(system, question_type, [records[(item.item_id, 0)] for item in common], golds)
-            )
+            if system in included and common:
+                answered = [records[(item.item_id, 0)] for item in common]
+                correct = np.array([r["answer"] == g for r, g in zip(answered, golds)], dtype=float)
+                correct_by_system[system] = correct
+                cells.update(_quality_cells(system, question_type, answered, golds, correct))
 
             order_path = result_path(results_root, system, "order", dataset)
             if question_type == "choice" and order_path.exists():
@@ -163,12 +175,24 @@ def build_scorecard(
 
             latency_path = result_path(results_root, system, "latency", dataset)
             if latency_path.exists():
-                timings = [r["latency_ms"] for r in load_records(latency_path).values() if r.get("status") == "ok"]
-                if timings:
+                timed = {k: r for k, r in load_records(latency_path).items() if r.get("status") == "ok"}
+                if timed:
+                    timings = [r["latency_ms"] for r in timed.values()]
                     cells["p50_ms"] = Cell(metrics.percentile(timings, 50))
                     cells["p95_ms"] = Cell(metrics.percentile(timings, 95))
+                    dates = [(r.get("meta") or {}).get("started_at", "")[:10] for r in timed.values()]
+                    card.measured_on = min([d for d in dates if d] + ([card.measured_on] if card.measured_on else []), default=None)
+                # the latency pass repeats main-pass questions in the same order: a same-order baseline
+                repeats = [
+                    (records[k]["answer"], r["answer"])
+                    for k, r in timed.items()
+                    if records.get(k, {}).get("status") == "ok"
+                ]
+                if repeats:
+                    cells["repeat_flip"] = Cell(sum(a != b for a, b in repeats) / len(repeats))
 
-            usages = [Usage(**r["usage"]) for r in records.values() if r.get("usage")]
+            # cost per answered decision: failed calls would otherwise dilute it
+            usages = [Usage(**r["usage"]) for r in records.values() if r.get("status") == "ok" and r.get("usage")]
             total = sum(usages, Usage())
             # an API that reports no token usage cannot be priced from its responses
             if total != Usage() and PRICE_KEY[system] in prices:
@@ -178,18 +202,22 @@ def build_scorecard(
             for metric, cell in cells.items():
                 card.cells[(dataset, system, metric)] = cell
 
+        # Verdicts test the paired difference on the shared items. Comparing two separate
+        # intervals for overlap would miss differences that the pairing makes clear.
         for reference in REFERENCES:
-            ref = card.cells.get((dataset, reference, "accuracy"))
-            if ref is None or ref.ci is None:
+            if reference not in correct_by_system:
                 continue
-            for system in included:
-                cell = card.cells[(dataset, system, "accuracy")]
-                if not system.startswith("haiku") or cell.ci is None:
+            for system, correct in correct_by_system.items():
+                if not system.startswith("haiku"):
                     continue
-                if overlaps(ref.ci, cell.ci):
-                    verdict = "no difference"
+                diff = correct - correct_by_system[reference]
+                lo, hi = bootstrap_ci(lambda idx: float(diff[idx].mean()), len(diff))
+                if lo > 0:
+                    verdict = f"{system} higher"
+                elif hi < 0:
+                    verdict = f"{reference} higher"
                 else:
-                    verdict = f"{reference if ref.value > cell.value else system} higher"
+                    verdict = "not distinguishable"
                 card.verdicts[(dataset, reference, system)] = verdict
     return card
 
@@ -198,7 +226,7 @@ def _format(metric: str, cell: Cell) -> str:
     if cell.value is None:
         return cell.note or NOT_APPLICABLE
     if cell.ci is not None:
-        return f"{cell.value:.3f} [{cell.ci[0]:.2f}, {cell.ci[1]:.2f}]"
+        return f"{cell.value:.3f} [{cell.ci[0]:.3f}, {cell.ci[1]:.3f}]"
     if metric in ("p50_ms", "p95_ms"):
         return f"{cell.value:.0f}"
     if metric == "usd_per_1k":
@@ -235,7 +263,13 @@ def render_markdown(card: Scorecard, *, location: str, date: str, prices_as_of: 
     lines += [
         "Brackets are 95% bootstrap intervals. `none`: the mode produces no probabilities. `n/a`: not applicable.",
         "",
-        f"Measured from {location} on {date}. N={n} samples per decision in the sampled modes. "
+        "Accuracy verdicts test the paired difference on the items every system answered. "
+        "Brier is the multiclass form (0 is perfect, 2 is worst). "
+        "Flip rate is the share of items whose answer changed across five reorderings of the options; "
+        "Repeat flip is the share whose answer changed between two runs with the same order, "
+        "so it shows how much of the flip rate is sampling noise.",
+        "",
+        f"Measured from {location} on {card.measured_on or date}. N={n} samples per decision in the sampled modes. "
         f"Prices as of {prices_as_of}.",
         "",
     ]

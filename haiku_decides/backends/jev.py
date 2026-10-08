@@ -32,7 +32,7 @@ def _map(question: Question, raw: dict | None) -> Answer:
         return Answer("error", error="no answer returned for this question")
     try:
         if question.type == "noul":
-            return noul_answer(float(raw["noul"]))
+            return noul_answer(raw["noul"])
         if question.type == "choice":
             return choice_answer(question, raw["choice"], raw.get("probabilities") or {}, raw["confidence"])
         return score_answer(question, raw["score"], raw.get("probabilities") or {}, raw["confidence"])

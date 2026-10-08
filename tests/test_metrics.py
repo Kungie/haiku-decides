@@ -75,3 +75,9 @@ def test_bootstrap_ci_is_deterministic_and_tight_on_constant_data():
 def test_overlaps():
     assert overlaps((0.1, 0.3), (0.3, 0.5))
     assert not overlaps((0.1, 0.2), (0.3, 0.5))
+
+
+def test_ece_keeps_0_9_and_1_0_in_separate_bins():
+    conf = [0.9] * 50 + [1.0] * 50
+    correct = [True] * 50 + [True] * 40 + [False] * 10
+    assert ece(conf, correct) == pytest.approx(0.15)

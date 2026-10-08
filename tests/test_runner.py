@@ -110,3 +110,22 @@ def test_backend_exception_is_recorded_and_run_continues(tmp_path):
     s = run(FakeBackend("jev", fail_on={"d:1"}), choice_items(3), "main", p)
     assert (s.done, s.errors) == (3, 1)
     assert load_records(p)[("d:1", 0)]["status"] == "error"
+
+
+def test_order_pass_gives_each_item_five_distinct_reorderings(tmp_path):
+    b = FakeBackend("jev")
+    run(b, choice_items(30), "order", tmp_path / "o.jsonl")
+    by_item = {}
+    for _state, questions, seed in b.calls:
+        by_item.setdefault(seed.rsplit(":", 1)[0], set()).add(tuple(questions["q"].criteria))
+    assert all(len(orders) == 5 and ("a", "b", "c") not in orders for orders in by_item.values())
+
+
+def test_backend_exception_text_is_not_persisted(tmp_path):
+    class Leaky(FakeBackend):
+        async def decide(self, state, questions, *, seed="0"):
+            raise RuntimeError(f"failed on {state}")
+
+    p = tmp_path / "out.jsonl"
+    run(Leaky("jev"), choice_items(1), "main", p)
+    assert "SECRET" not in p.read_text() and load_records(p)[("d:0", 0)]["error"] == "RuntimeError"

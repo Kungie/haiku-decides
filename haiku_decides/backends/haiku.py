@@ -31,27 +31,32 @@ SYSTEM_PROMPT = (
 Mode = Literal["single", "sampled", "shuffled"]
 
 
-def _esc(text: object) -> str:
+def _attr(text: object) -> str:
     return html.escape(str(text), quote=True)
+
+
+def _text(text: object) -> str:
+    # quotes are harmless in element text; escaping them would only garble what the model reads
+    return html.escape(str(text), quote=False)
 
 
 def render_question(question: Question, order: list[str]) -> str:
     lines = [
         f'<question type="{question.type}">',
-        f"<instructions>{_esc(question.instructions)}</instructions>",
+        f"<instructions>{_text(question.instructions)}</instructions>",
     ]
     if question.type == "choice":
         lines.append("<options>")
-        lines += [f'<option key="{_esc(key)}">{_esc(question.criteria[key])}</option>' for key in order]
+        lines += [f'<option key="{_attr(key)}">{_text(question.criteria[key])}</option>' for key in order]
         lines.append("</options>")
     elif question.type == "score":
         # levels are ordered, so they are never shuffled
         lines.append("<levels>")
-        lines += [f'<level index="{i}">{_esc(level)}</level>' for i, level in enumerate(question.criteria)]
+        lines += [f'<level index="{i}">{_text(level)}</level>' for i, level in enumerate(question.criteria)]
         lines.append("</levels>")
     elif question.criteria:
-        lines.append(f"<true>{_esc(question.criteria['true'])}</true>")
-        lines.append(f"<false>{_esc(question.criteria['false'])}</false>")
+        lines.append(f"<true>{_text(question.criteria['true'])}</true>")
+        lines.append(f"<false>{_text(question.criteria['false'])}</false>")
     lines.append("</question>")
     return "\n".join(lines)
 
@@ -125,7 +130,23 @@ def parse_sample(response, question: Question) -> Sample:
 
 
 class HaikuBackend:
-    def __init__(self, client, mode: Mode, n: int = 10, effort: str = "medium"):
+    def __init__(
+        self,
+        client,
+        mode: Mode,
+        n: int = 10,
+        effort: str = "medium",
+        *,
+        cache: bool = True,
+        warm_first: bool = False,
+    ):
+        """`cache` marks the question block for prompt caching (never in shuffled mode).
+
+        `warm_first` finishes one sample before starting the rest, so they read the cache
+        the first one wrote. Parallel requests cannot read each other's cache writes.
+        """
+        self.cache = cache
+        self.warm_first = warm_first
         self.client = client
         self.mode = mode
         self.n = 1 if mode == "single" else n
@@ -148,9 +169,15 @@ class HaikuBackend:
         else:
             orders = [keys] * self.n
         # a shuffled question block differs on every call, so there is nothing to cache
-        cache = self.mode != "shuffled"
+        cache = self.cache and self.mode != "shuffled"
         started = time.perf_counter()
-        samples = await asyncio.gather(*(self._sample(state, question, order, cache) for order in orders))
+        first = []
+        if self.warm_first and cache and len(orders) > 1:
+            first = [await self._sample(state, question, orders[0], cache)]
+            orders = orders[1:]
+        samples = first + list(
+            await asyncio.gather(*(self._sample(state, question, order, cache) for order in orders))
+        )
         latency_ms = (time.perf_counter() - started) * 1000
         return aggregate(question, list(samples), with_probabilities=self.mode != "single", latency_ms=latency_ms)
 
@@ -159,5 +186,7 @@ class HaikuBackend:
         try:
             response = await self.client.messages.create(**request)
         except anthropic.APIError as e:
-            return Sample("error", error=str(e))
+            # the type and status only: an API error message can quote the request
+            status = getattr(e, "status_code", None)
+            return Sample("error", error=type(e).__name__ + (f" {status}" if status else ""))
         return parse_sample(response, question)

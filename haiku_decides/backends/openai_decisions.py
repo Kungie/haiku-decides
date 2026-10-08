@@ -55,7 +55,7 @@ def _map(question: Question, raw: dict | None) -> Answer:
         return Answer("refused")
     try:
         if question.type == "noul":
-            return noul_answer(float(raw["probability"]))
+            return noul_answer(raw["probability"])
         probabilities = {str(p["value"]): p["probability"] for p in raw.get("probabilities") or []}
         if question.type == "choice":
             return choice_answer(question, raw["choice"], probabilities, raw["confidence"])

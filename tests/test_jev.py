@@ -122,3 +122,9 @@ def test_from_env_validates(monkeypatch):
     monkeypatch.setenv("JEV_MODEL", "typesafe/jev-latest")
     with pytest.raises(ValueError, match="latest"):
         JevBackend.from_env(httpx.AsyncClient())
+
+
+def test_error_body_is_not_persisted(no_sleep):
+    b = backend(recording([], [httpx.Response(401, text="invalid key sk-secret-123 for input: private text")]), no_sleep)
+    out = asyncio.run(b.decide("s", QS))
+    assert out["department"].error == "HTTP 401"

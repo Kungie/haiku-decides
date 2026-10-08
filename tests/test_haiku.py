@@ -137,3 +137,39 @@ def test_api_error_becomes_error_sample():
     c = FakeClient([boom] + [resp('{"answer": "a"}')] * 9)
     a = asyncio.run(HaikuBackend(c, "sampled", n=10).decide("s", {"q": Q}))["q"]
     assert a.status == "ok" and a.n_ok == 9
+
+
+def test_apostrophes_in_text_reach_the_model_unescaped():
+    assert "john's" in render_question(Question("noul", "is it john's?"), ["true", "false"])
+
+
+def test_cache_can_be_turned_off():
+    c = FakeClient([resp('{"answer": "b"}')])
+    asyncio.run(HaikuBackend(c, "single", cache=False).decide("s", {"q": Q}))
+    assert all("cache_control" not in block for block in c.calls[0]["messages"][0]["content"])
+
+
+class OrderClient(FakeClient):
+    async def _create(self, **kwargs):
+        index = len(self.calls)
+        self.calls.append(kwargs)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        if index == 0:
+            self.started_when_first_returned = len(self.calls)
+        return self._responses.pop(0)
+
+
+def test_warm_first_finishes_one_sample_before_fanning_out():
+    warm = OrderClient([resp('{"answer": "b"}')] * 4)
+    asyncio.run(HaikuBackend(warm, "sampled", n=4, warm_first=True).decide("s", {"q": Q}))
+    assert warm.started_when_first_returned == 1 and len(warm.calls) == 4
+    cold = OrderClient([resp('{"answer": "b"}')] * 4)
+    asyncio.run(HaikuBackend(cold, "sampled", n=4).decide("s", {"q": Q}))
+    assert cold.started_when_first_returned == 4
+
+
+def test_api_error_text_is_not_persisted():
+    boom = anthropic.APIConnectionError(message="could not reach host with private text", request=httpx.Request("POST", "https://x"))
+    a = asyncio.run(HaikuBackend(FakeClient([boom]), "single").decide("s", {"q": Q}))["q"]
+    assert a.status == "error" and a.error == "APIConnectionError"

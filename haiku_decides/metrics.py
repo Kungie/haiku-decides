@@ -30,11 +30,12 @@ def mean_absolute_error(golds: Sequence[int], answers: Sequence[int]) -> float:
 
 
 def ece(confidences: Sequence[float], corrects: Sequence[bool], n_bins: int = 10) -> float:
-    """Expected calibration error over equal-width bins of the chosen answer's probability."""
+    """Expected calibration error over equal-width, right-closed bins of the chosen answer's probability."""
     conf = np.asarray(confidences, dtype=float)
     correct = np.asarray(corrects, dtype=float)
-    # round before flooring so 0.7 * 10 == 7.000000000000001 and 0.3 * 10 land in the intended bin
-    bins = np.minimum(np.floor(np.round(conf * n_bins, 9)).astype(int), n_bins - 1)
+    # Bins are right-closed, (lo, hi], so a confidence of 0.9 and one of 1.0 never share a bin.
+    # Rounding first keeps 0.7 * 10 == 7.000000000000001 in the bin it belongs to.
+    bins = np.clip(np.ceil(np.round(conf * n_bins, 9)).astype(int) - 1, 0, n_bins - 1)
     total = 0.0
     for b in np.unique(bins):
         mask = bins == b
@@ -43,6 +44,7 @@ def ece(confidences: Sequence[float], corrects: Sequence[bool], n_bins: int = 10
 
 
 def brier(probabilities: Sequence[dict[str, float]], gold_keys: Sequence[str]) -> float:
+    """Multiclass Brier score, summed over options: 0 is perfect, 2 is worst."""
     scores = [
         sum((p - (1.0 if key == gold else 0.0)) ** 2 for key, p in probs.items())
         for probs, gold in zip(probabilities, gold_keys)

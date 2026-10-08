@@ -49,3 +49,9 @@ def test_partial_success_rule():
 def test_single_mode_has_no_probabilities():
     a = aggregate(CHOICE, [ok("b")], with_probabilities=False, latency_ms=0)
     assert a.answer == "b" and a.probabilities is None and a.confidence is None
+
+
+def test_tie_break_does_not_depend_on_presented_order():
+    reordered = Question("choice", "q", {"b": "B", "a": "A"})
+    a = aggregate(reordered, [ok("b")] * 5 + [ok("a")] * 5, with_probabilities=True, latency_ms=0)
+    assert a.answer == "a"

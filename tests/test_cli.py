@@ -7,6 +7,14 @@ from haiku_decides.runner import RunSummary
 from haiku_decides.schema import Question
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _away_from_the_real_env_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 def test_load_env_file_does_not_override(tmp_path, monkeypatch):
     f = tmp_path / ".env"
     f.write_text("# c\nA_KEY=from_file\nB_KEY = spaced \n\n")
@@ -24,10 +32,11 @@ def test_make_backends_names(monkeypatch):
 
 
 def test_run_skips_inapplicable_and_sets_concurrency(tmp_path, monkeypatch):
-    calls = []
+    calls, settings = [], {}
 
     async def fake_run_pass(backend, items, pass_name, out_path, *, decision_concurrency, meta, limit=None):
         calls.append((backend.name, pass_name, out_path.stem, decision_concurrency, limit))
+        settings[(backend.name, pass_name)] = (backend.cache, backend.warm_first)
         return RunSummary(0, 0, 0)
 
     def fake_load_items(name, **kw):
@@ -44,6 +53,11 @@ def test_run_skips_inapplicable_and_sets_concurrency(tmp_path, monkeypatch):
     assert ("haiku-shuffled", "main", "banking77", 2, 5) in calls
     assert ("haiku-single", "main", "sst5", 20, 5) in calls
     assert not [c for c in calls if c[1] == "order" and c[2] in ("boolq", "sms_spam", "sst5")]
+    # reordered prompts are unique, so the order pass must not pay for cache writes it cannot read back
+    assert settings[("haiku-single", "order")] == (False, False)
+    assert settings[("haiku-sampled", "order")] == (True, True)
+    assert settings[("haiku-sampled", "main")] == (True, False)
+    assert settings[("haiku-single", "main")] == (True, False)
 
 
 def test_missing_key_exits_2_and_names_variable(monkeypatch, capsys, tmp_path):
@@ -64,3 +78,10 @@ def test_report_needs_no_keys(tmp_path, monkeypatch):
     argv = ["report", "--results", str(tmp_path), "--out", str(out), "--chart", str(chart), "--location", "X"]
     assert cli.main(argv) == 0
     assert out.exists()
+
+
+def test_haiku_needs_credentials_up_front(monkeypatch):
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+        make_backends("haiku", "single", 10)

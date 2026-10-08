@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .backends.base import Backend
 from .datasets import Item
-from .ordering import permute_criteria
+from .ordering import reorderings
 from .schema import Answer, QuestionType
 
 PASSES = ("main", "order", "latency")
@@ -106,13 +106,15 @@ async def run_pass(
             question = item.question
             # the shuffled mode permutes options itself, so it gets the original order
             if pass_name == "order" and backend.name != SHUFFLED:
-                question = replace(question, criteria=permute_criteria(question.criteria, seed))
+                order = reorderings(list(question.criteria), item.item_id, ORDER_PERMUTATIONS)[pid - 1]
+                question = replace(question, criteria={key: question.criteria[key] for key in order})
             async with semaphore:
                 try:
                     answers = await backend.decide(item.state, {QUESTION_NAME: question}, seed=seed)
                     answer = answers[QUESTION_NAME]
                 except Exception as e:  # one bad decision must not end the run
-                    answer = Answer("error", error=repr(e))
+                    # only the exception type is kept: its message could echo dataset text
+                    answer = Answer("error", error=type(e).__name__)
             # the record carries model output only, never dataset text
             record = {"item_id": item.item_id, "permutation_id": pid, **asdict(answer), "meta": meta}
             out.write(json.dumps(record, ensure_ascii=False) + "\n")

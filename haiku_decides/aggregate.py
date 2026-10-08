@@ -34,8 +34,10 @@ def aggregate(question: Question, samples: list[Sample], *, with_probabilities: 
         )
 
     shares = {key: sum(s.answer == key for s in oks) / n_ok for key in keys}
-    # max() keeps the first maximum, so ties go to the earliest option
-    top = max(keys, key=lambda key: shares[key])
+    # max() keeps the first maximum. Choice ties go to the alphabetically first key, so the
+    # winner never depends on the order the options were presented in.
+    ranked = sorted(keys) if question.type == "choice" else keys
+    top = max(ranked, key=lambda key: shares[key])
 
     if question.type == "noul":
         answer: str | bool | int = shares["true"] >= 0.5

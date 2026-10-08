@@ -37,12 +37,16 @@ Four things are measured:
 - **Calibration**: when a system says 80%, is it right 80% of the time?
   Reported as expected calibration error (10 bins) and Brier score.
 - **Order sensitivity**: how often the answer flips, and how far the
-  probabilities move, when the same options are listed in a different order.
+  probabilities move, across five different orderings of the same options. A
+  "repeat flip" column shows how often the answer changes between two runs with
+  the same order, so you can see how much of a flip rate is plain sampling noise.
 - **Latency and cost**: p50 and p95 per decision, and dollars per 1,000
   decisions.
 
-Accuracy and calibration come with 95% bootstrap intervals. When two intervals
-overlap, the scorecard says "no difference".
+Accuracy and calibration come with 95% bootstrap intervals. Accuracy verdicts
+test the paired difference on the items every system answered, and say "not
+distinguishable" when that difference could be zero. Brier is the multiclass
+form: 0 is perfect, 2 is worst.
 
 ## Reproduce
 
@@ -97,10 +101,14 @@ The text is downloaded from Hugging Face when you run the benchmark.
 - Only the option list in the prompt is reordered. The enum in the output schema
   stays sorted, so order sensitivity for Claude Haiku 5.5 measures the prompt
   alone.
-- The OpenAI Decisions API is in public beta and its guide documents no token
-  usage field. If the API returns none, its cost shows as `n/a`.
+- The OpenAI Decisions API is in public beta and may change.
+- The latency pass re-sends questions the main pass already asked. If a provider
+  caches responses, its latency here is flattering.
+- Cost is per answered decision at list prices, with whatever prompt caching
+  each run happened to get.
 - `report` reads each dataset from the local Hugging Face cache to get the
-  labels, so it needs the datasets to have been downloaded once.
+  labels, so it needs the datasets to have been downloaded once (`select-ids`
+  does that). Dataset revisions are pinned.
 
 ## License
 

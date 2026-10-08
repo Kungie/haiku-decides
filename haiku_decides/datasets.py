@@ -36,6 +36,7 @@ class LoadedSplit:
 class DatasetSpec:
     name: str
     hf_id: str
+    revision: str  # pinned commit, so row indices keep pointing at the same rows
     split: str
     question_type: QuestionType
     license: str  # as declared on the Hugging Face dataset card
@@ -83,11 +84,11 @@ def _sst5(name: str, index: int, row: dict, label_names: list[str] | None) -> It
 DATASETS: dict[str, DatasetSpec] = {
     spec.name: spec
     for spec in (
-        DatasetSpec("banking77", "legacy-datasets/banking77", "test", "choice", "cc-by-4.0", _banking77),
-        DatasetSpec("ag_news", "fancyzhx/ag_news", "test", "choice", "unknown", _ag_news),
-        DatasetSpec("boolq", "google/boolq", "validation", "noul", "cc-by-sa-3.0", _boolq),
-        DatasetSpec("sms_spam", "ucirvine/sms_spam", "train", "noul", "unknown", _sms_spam),
-        DatasetSpec("sst5", "SetFit/sst5", "test", "score", "not stated", _sst5),
+        DatasetSpec("banking77", "legacy-datasets/banking77", "f54121560de48f2852f90be299010d1d6dc612ec", "test", "choice", "cc-by-4.0", _banking77),
+        DatasetSpec("ag_news", "fancyzhx/ag_news", "eb185aade064a813bc0b7f42de02595523103ca4", "test", "choice", "unknown", _ag_news),
+        DatasetSpec("boolq", "google/boolq", "35b264d03638db9f4ce671b711558bf7ff0f80d5", "validation", "noul", "cc-by-sa-3.0", _boolq),
+        DatasetSpec("sms_spam", "ucirvine/sms_spam", "cae486f927c250fe1d4a5b55f11357964ed1646c", "train", "noul", "unknown", _sms_spam),
+        DatasetSpec("sst5", "SetFit/sst5", "e51bdcd8cd3a30da231967c1a249ba59361279a3", "test", "score", "not stated", _sst5),
     )
 }
 
@@ -100,7 +101,7 @@ def select_ids(n_rows: int, k: int = SAMPLE_SIZE, seed: int = SEED) -> list[int]
 def default_load(spec: DatasetSpec) -> LoadedSplit:
     import datasets as hf_datasets
 
-    split = hf_datasets.load_dataset(spec.hf_id, split=spec.split)
+    split = hf_datasets.load_dataset(spec.hf_id, split=spec.split, revision=spec.revision)
     label = split.features.get("label")
     label_names = list(label.names) if isinstance(label, hf_datasets.ClassLabel) else None
     return LoadedSplit(list(split), label_names)

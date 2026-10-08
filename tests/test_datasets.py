@@ -69,3 +69,9 @@ def test_items_follow_committed_id_order(tmp_path):
 def test_missing_ids_file_points_to_command(tmp_path):
     with pytest.raises(FileNotFoundError, match="select-ids"):
         load_items("ag_news", ids_dir=tmp_path, load=fake([]))
+
+
+def test_every_dataset_pins_a_revision():
+    from haiku_decides.datasets import DATASETS
+
+    assert all(len(spec.revision) == 40 for spec in DATASETS.values())

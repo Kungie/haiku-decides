@@ -53,10 +53,9 @@ def make_backends(backend: str, mode: str, n: int) -> list[Backend]:
         if backend in ("openai", "all"):
             backends.append(OpenAIDecisionsBackend.from_env(http))
     if backend in ("haiku", "all"):
-        try:
-            client = anthropic.AsyncAnthropic(max_retries=4)
-        except anthropic.AnthropicError as e:
-            raise ValueError(f"ANTHROPIC_API_KEY is not set ({e})") from e
+        if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+            raise ValueError("ANTHROPIC_API_KEY is not set")
+        client = anthropic.AsyncAnthropic(max_retries=4, timeout=HTTP_TIMEOUT_SECONDS)
         modes = HAIKU_MODES if mode == "all" else (mode,)
         backends += [HaikuBackend(client, m, n=n) for m in modes]
     return backends
@@ -102,6 +101,11 @@ async def _run(args) -> int:
             for pass_name in passes:
                 if not applicable(backend.name, question_type, pass_name):
                     continue
+                if is_haiku:
+                    # Every reordered prompt is unique. A lone call would pay for a cache write nobody
+                    # reads; a sampled decision can still reuse it if one sample goes first.
+                    backend.cache = pass_name != "order" or sampled
+                    backend.warm_first = pass_name == "order" and sampled
                 summary = await run_pass(
                     backend,
                     items,
@@ -124,7 +128,15 @@ def _report(args) -> int:
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
     as_of, prices = load_prices(PRICES_PATH)
-    items = {name: load_items(name) for name in DATASETS}
+    try:
+        items = {name: load_items(name) for name in DATASETS}
+    except (ConnectionError, OSError) as e:
+        if isinstance(e, FileNotFoundError):
+            raise
+        raise ValueError(
+            "the datasets are not in the local Hugging Face cache; run `haiku-decides select-ids` "
+            "or `haiku-decides run` once to download them"
+        ) from e
     card = build_scorecard(Path(args.results), items, prices)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

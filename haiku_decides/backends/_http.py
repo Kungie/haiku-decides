@@ -22,14 +22,15 @@ async def post_json(
         try:
             response = await http.post(url, headers=headers, json=payload)
         except httpx.TransportError as e:
-            error = f"transport error: {e!r}"
+            # error text is persisted in result files, so it carries no response body or message
+            error = type(e).__name__
         else:
             if response.status_code < 300:
                 try:
                     return response.json(), None
                 except ValueError:
                     return None, "response body is not JSON"
-            error = f"HTTP {response.status_code}: {response.text[:200]}"
+            error = f"HTTP {response.status_code}"
             if response.status_code not in RETRYABLE_STATUS and response.status_code < 500:
                 return None, error
         if attempt + 1 < max_attempts:

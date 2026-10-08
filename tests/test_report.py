@@ -20,7 +20,8 @@ USAGE = {"input_tokens": 500, "output_tokens": 50, "cache_read_input_tokens": 0,
 NO_USAGE = dict.fromkeys(USAGE, 0)
 
 
-def rec(item_id, pid=0, status="ok", answer="a", probs=None, conf=None, latency=100.0, usage=USAGE):
+def rec(item_id, pid=0, status="ok", answer="a", probs=None, conf=None, latency=100.0, usage=USAGE,
+        started_at="2026-10-07T10:00:00+00:00"):
     return {
         "item_id": item_id,
         "permutation_id": pid,
@@ -34,7 +35,7 @@ def rec(item_id, pid=0, status="ok", answer="a", probs=None, conf=None, latency=
         "usage": usage,
         "latency_ms": latency,
         "error": None,
-        "meta": {"n": 10},
+        "meta": {"n": 10, "started_at": started_at},
     }
 
 
@@ -104,8 +105,8 @@ def test_markdown_and_chart(tmp_path):
     card = build_scorecard(tmp_path, {"d": ITEMS}, PR)
     md = render_markdown(card, location="Istanbul", date="2026-10-08", prices_as_of="2026-10-08")
     assert "| jev |" in md and "| haiku-sampled |" in md
-    assert "no difference" in md and "Istanbul" in md and "N=10" in md
-    assert "1.000 [1.00, 1.00]" in md
+    assert "not distinguishable" in md and "Istanbul" in md and "N=10" in md
+    assert "1.000 [1.000, 1.000]" in md
     render_chart(card, tmp_path / "c.png")
     assert (tmp_path / "c.png").stat().st_size > 0
 
@@ -127,3 +128,61 @@ def test_empty_scorecard_writes_no_chart(tmp_path):
 
     assert render_chart(Scorecard(), tmp_path / "c.png") is False
     assert not (tmp_path / "c.png").exists()
+
+
+def test_verdict_uses_the_paired_difference_not_interval_overlap(tmp_path):
+    from haiku_decides.metrics import overlaps
+
+    items = [Item(f"d:{i}", "s", CHOICE, "a") for i in range(200)]
+    # jev is wrong on 20 items; haiku is wrong on 10 of those same items and never worse
+    write(tmp_path, "jev", "main", "d", [rec(f"d:{i}", answer="b" if i < 20 else "a") for i in range(200)])
+    write(tmp_path, "haiku-single", "main", "d", [rec(f"d:{i}", answer="b" if i < 10 else "a") for i in range(200)])
+    card = build_scorecard(tmp_path, {"d": items}, PR)
+    jev, haiku = card.cells[("d", "jev", "accuracy")], card.cells[("d", "haiku-single", "accuracy")]
+    assert overlaps(jev.ci, haiku.ci)
+    assert card.verdicts[("d", "jev", "haiku-single")] == "haiku-single higher"
+
+
+def test_system_with_no_ok_rows_does_not_blank_the_others(tmp_path):
+    write(tmp_path, "jev", "main", "d", [rec(f"d:{i}") for i in range(4)])
+    write(tmp_path, "openai", "main", "d", [rec(f"d:{i}", status="error", answer=None) for i in range(4)])
+    card = build_scorecard(tmp_path, {"d": ITEMS}, PR)
+    assert card.comparison_size["d"] == 4
+    assert card.cells[("d", "jev", "accuracy")].value == 1.0
+    assert card.cells[("d", "openai", "accuracy")].note == "n/a"
+    assert card.cells[("d", "openai", "coverage")].value == 0.0
+
+
+def test_flip_rate_only_counts_items_with_every_ordering(tmp_path):
+    write(tmp_path, "jev", "main", "d", [rec(f"d:{i}") for i in range(4)])
+    write(
+        tmp_path, "jev", "order", "d",
+        [rec("d:0", pid=p, probs={"a": 1.0, "b": 0.0}) for p in range(1, 6)]
+        + [rec("d:1", pid=1, answer="a"), rec("d:1", pid=2, answer="b")],
+    )
+    card = build_scorecard(tmp_path, {"d": ITEMS}, PR)
+    assert card.cells[("d", "jev", "flip_rate")].value == 0.0
+
+
+def test_cost_is_per_answered_decision(tmp_path):
+    write(
+        tmp_path, "jev", "main", "d",
+        [rec("d:0"), rec("d:1")] + [rec(f"d:{i}", status="error", answer=None, usage=NO_USAGE) for i in (2, 3)],
+    )
+    card = build_scorecard(tmp_path, {"d": ITEMS}, PR)
+    assert card.cells[("d", "jev", "usd_per_1k")].value == pytest.approx(0.021)
+
+
+def test_repeat_flip_is_the_same_order_baseline(tmp_path):
+    write(tmp_path, "jev", "main", "d", [rec(f"d:{i}") for i in range(4)])
+    write(tmp_path, "jev", "latency", "d", [rec("d:0", answer="a"), rec("d:1", answer="b")])
+    card = build_scorecard(tmp_path, {"d": ITEMS}, PR)
+    assert card.cells[("d", "jev", "repeat_flip")].value == 0.5
+
+
+def test_footer_uses_the_measurement_date(tmp_path):
+    write(tmp_path, "jev", "main", "d", [rec(f"d:{i}") for i in range(4)])
+    write(tmp_path, "jev", "latency", "d", [rec("d:0")])
+    card = build_scorecard(tmp_path, {"d": ITEMS}, PR)
+    md = render_markdown(card, location="Istanbul", date="2026-12-31", prices_as_of="2026-10-08")
+    assert "on 2026-10-07" in md and "2026-12-31" not in md
