@@ -11,12 +11,70 @@ ways and measures how close each one gets.
 
 ## Results
 
-The first full run is in progress. The scorecard and chart will appear here when
-it finishes.
+First full run, 8 October 2026. Full numbers with intervals are in
+[results/scorecard.md](results/scorecard.md); the raw decisions are in
+[results/](results).
 
-It covers 500 items per dataset for accuracy and calibration. To keep API spend
-small, the order-sensitivity and latency passes use fewer items than the
-defaults; the exact counts will be listed with the results.
+![Accuracy and calibration error for each system on each dataset](results/scorecard.png)
+
+**Accuracy** (500 items per dataset)
+
+| Dataset | Jev | OpenAI Decisions | Haiku single | Haiku sampled | Haiku shuffled |
+|---|---|---|---|---|---|
+| Banking77 (77 options) | 79.9% | 79.3% | 79.1% | 79.5% | 80.3% |
+| AG News (4 options) | 89.2% | 88.2% | 88.2% | 88.4% | 88.0% |
+| BoolQ (yes/no) | 91.0% | 83.8% | 87.2% | 87.8% | n/a |
+| SMS Spam (yes/no) | 96.6% | 97.2% | 96.2% | 96.4% | n/a |
+| SST-5 (5 levels) | 55.8% | 50.2% | 52.6% | 53.2% | n/a |
+
+**Calibration error** (ECE, lower is better)
+
+| Dataset | Jev | OpenAI Decisions | Haiku sampled | Haiku shuffled |
+|---|---|---|---|---|
+| Banking77 | 0.088 | 0.085 | 0.185 | 0.114 |
+| AG News | 0.074 | 0.092 | 0.112 | 0.105 |
+| BoolQ | 0.021 | 0.109 | 0.116 | n/a |
+| SMS Spam | 0.063 | 0.016 | 0.035 | n/a |
+| SST-5 | 0.209 | 0.269 | 0.441 | n/a |
+
+**Speed and cost** (range across the five datasets)
+
+| | Jev | OpenAI Decisions | Haiku single | Haiku sampled | Haiku shuffled |
+|---|---|---|---|---|---|
+| Median latency | 261-278 ms | 139-252 ms | 813-1228 ms | 876-2323 ms | 1217-1360 ms |
+| Cost per 1,000 decisions | $0.014-0.071 | $0.016-0.099 | $0.040-0.054 | $0.40-0.54 | $0.54-2.11 |
+
+What the run shows:
+
+- **One Haiku 5.5 call is as accurate as the native decision APIs on four of
+  the five datasets.** The paired difference from Jev and from OpenAI Decisions
+  is not distinguishable from zero on Banking77, AG News, SMS Spam and SST-5.
+  On BoolQ, Jev is ahead of Haiku (91.0% against 87.2%), and sampled Haiku is
+  ahead of OpenAI Decisions (87.8% against 83.8%).
+- **Sampling ten times buys probabilities, not accuracy.** The sampled mode
+  matches the single call on every dataset and costs eight to ten times as much.
+- **Those probabilities are less well calibrated than the native ones.** Sampled
+  Haiku has the highest calibration error on four of the five datasets, though
+  on BoolQ it is level with OpenAI Decisions. SMS Spam is the exception, where
+  it sits between the two native APIs. Shuffling the option order brings Banking77 from
+  0.185 down to 0.114, at five times the cost of plain sampling.
+- **The native APIs are three to nine times faster.** Their median is 140 to
+  280 ms; a single Haiku call takes 0.8 to 1.2 seconds with thinking off.
+- **A single Haiku call is not the expensive option.** On Banking77 it was the
+  cheapest of the three, because the 77-option question repeats and 97% of its
+  input came from the prompt cache.
+- **Order sensitivity differs a lot on the 77-option task.** Across five
+  reorderings of the options, the answer changed for 4% of items with Jev, 30%
+  with OpenAI Decisions, 22% with a single Haiku call and 8% with shuffled
+  Haiku. The same-order baseline was 2% or less. This comes from 50 items per
+  dataset, so treat it as a first reading. On AG News every system stayed at 4%
+  or below.
+
+This run used 500 items per dataset for accuracy and calibration, 50 items
+times 5 reorderings for order sensitivity (the two choice datasets), and 50
+items per dataset for latency. The order and latency samples are smaller than
+the tool's defaults (200 and 100) to keep API spend down. Latency was measured
+from a single client machine.
 
 ## How it works
 
