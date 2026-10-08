@@ -1,0 +1,19 @@
+as_of = "2026-10-08"
+
+["claude-haiku-5-5"]   # prompts up to 100K tokens
+input = 0.10
+output = 0.50
+cache_read = 0.01
+cache_write = 0.125
+
+[jev]                  # varies by host; set to your provider's rate
+input = 0.042
+output = 0.0
+cache_read = 0.0
+cache_write = 0.0
+
+[openai-decisions]     # gpt-6-luna via the Decisions API; input tokens only
+input = 0.10
+output = 0.0
+cache_read = 0.0
+cache_write = 0.0
