@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "haiku-decides"
+version = "0.1.0"
+description = "Claude Haiku 5.5 as a decision model, benchmarked against Jev and the OpenAI Decisions API"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["anthropic", "httpx", "datasets", "numpy", "matplotlib"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+haiku-decides = "haiku_decides.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["haiku_decides*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: needs API keys and network"]

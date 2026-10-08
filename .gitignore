@@ -7,3 +7,6 @@ __pycache__/
 dist/
 *.egg-info/
 .DS_Store
+.superpowers/
+!.env.example
+results-dry/
