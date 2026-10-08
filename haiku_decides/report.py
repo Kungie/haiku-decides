@@ -259,13 +259,17 @@ SERIES = {
 PANELS = (("accuracy", "Accuracy (higher is better)"), ("ece", "Calibration error (lower is better)"))
 
 
-def render_chart(card: Scorecard, path: Path) -> None:
+def render_chart(card: Scorecard, path: Path) -> bool:
+    """Write the chart and return True, or return False when there is nothing to plot."""
+    datasets = _datasets(card)
+    if not datasets:
+        return False
+
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    datasets = _datasets(card)
     fig, axes = plt.subplots(1, 2, figsize=(11, 1.6 + 0.9 * max(len(datasets), 1)), sharey=True)
     fig.patch.set_facecolor(SURFACE)
     step = 0.15
@@ -312,3 +316,4 @@ def render_chart(card: Scorecard, path: Path) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=160, facecolor=SURFACE)
     plt.close(fig)
+    return True

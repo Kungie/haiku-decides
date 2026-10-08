@@ -120,3 +120,10 @@ def test_zero_usage_makes_cost_not_applicable(tmp_path):
 def test_load_prices():
     as_of, prices = load_prices(Path("prices.toml"))
     assert as_of == "2026-10-08" and prices["claude-haiku-5-5"] == Prices(0.10, 0.50, 0.01, 0.125)
+
+
+def test_empty_scorecard_writes_no_chart(tmp_path):
+    from haiku_decides.report import Scorecard
+
+    assert render_chart(Scorecard(), tmp_path / "c.png") is False
+    assert not (tmp_path / "c.png").exists()
