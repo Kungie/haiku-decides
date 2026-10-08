@@ -11,7 +11,12 @@ ways and measures how close each one gets.
 
 ## Results
 
-Results pending. The first full run has not been published yet.
+The first full run is in progress. The scorecard and chart will appear here when
+it finishes.
+
+It covers 500 items per dataset for accuracy and calibration. To keep API spend
+small, the order-sensitivity and latency passes use fewer items than the
+defaults; the exact counts will be listed with the results.
 
 ## How it works
 
