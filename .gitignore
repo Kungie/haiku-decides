@@ -10,3 +10,4 @@ dist/
 .superpowers/
 !.env.example
 results-dry/
+docs/superpowers/
