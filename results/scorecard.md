@@ -90,4 +90,4 @@ Brackets are 95% bootstrap intervals. `none`: the mode produces no probabilities
 
 Accuracy verdicts test the paired difference on the items every system answered. Brier is the multiclass form (0 is perfect, 2 is worst). Flip rate is the share of items whose answer changed across five reorderings of the options; Repeat flip is the share whose answer changed between two runs with the same order, so it shows how much of the flip rate is sampling noise.
 
-Measured from a single client machine on 2026-10-08. N=10 samples per decision in the sampled modes. Prices as of 2026-10-08.
+Measured from Aachen, Germany on 2026-10-08. N=10 samples per decision in the sampled modes. Prices as of 2026-10-08.

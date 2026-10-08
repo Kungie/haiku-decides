@@ -74,7 +74,7 @@ This run used 500 items per dataset for accuracy and calibration, 50 items
 times 5 reorderings for order sensitivity (the two choice datasets), and 50
 items per dataset for latency. The order and latency samples are smaller than
 the tool's defaults (200 and 100) to keep API spend down. Latency was measured
-from a single client machine.
+from a single client machine in Aachen, Germany.
 
 ## How it works
 
